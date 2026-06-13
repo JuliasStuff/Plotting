@@ -1,0 +1,1087 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no" />
+  <title>Plotting</title>
+  <link rel="manifest" href="manifest.json" />
+  <link rel="icon" type="image/png" sizes="192x192" href="icon-192.png" />
+  <link rel="apple-touch-icon" href="icon-192.png" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="apple-mobile-web-app-title" content="Plotting" />
+  <meta name="theme-color" content="#a855f7" />
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg:        #0f0a1e;
+      --card:      #1c1131;
+      --card2:     #241543;
+      --input-bg:  #0a0715;
+      --border:    rgba(168, 85, 247, 0.22);
+      --purple:    #a855f7;
+      --pink:      #ec4899;
+      --gold:      #f59e0b;
+      --green:     #34d399;
+      --red:       #f87171;
+      --fg:        #f0e6ff;
+      --muted:     #8b7ba8;
+      --radius:    14px;
+      --radius-sm: 9px;
+    }
+
+    html, body {
+      min-height: 100%;
+      background: var(--bg);
+      color: var(--fg);
+      font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    body { overflow-x: hidden; }
+
+    /* ── Confetti canvas ── */
+    #confetti-canvas {
+      position: fixed;
+      inset: 0;
+      pointer-events: none;
+      z-index: 1000;
+      display: none;
+    }
+
+    /* ── App shell ── */
+    #app {
+      max-width: 480px;
+      margin: 0 auto;
+      padding: 16px 14px 48px;
+      display: flex;
+      flex-direction: column;
+      gap: 14px;
+    }
+
+    /* ── Install bar ── */
+    #install-bar {
+      display: none;
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 11px 14px;
+      align-items: center;
+      gap: 10px;
+      font-size: 0.83rem;
+    }
+    #install-bar.visible { display: flex; }
+    #install-bar p { flex: 1; color: var(--muted); }
+    #install-btn {
+      background: var(--purple);
+      border: none;
+      border-radius: var(--radius-sm);
+      color: #fff;
+      font-size: 0.8rem;
+      font-weight: 700;
+      padding: 7px 13px;
+      cursor: pointer;
+      font-family: inherit;
+      white-space: nowrap;
+    }
+    #install-dismiss {
+      background: transparent;
+      border: none;
+      color: var(--muted);
+      cursor: pointer;
+      font-size: 1.2rem;
+      padding: 2px 6px;
+      line-height: 1;
+    }
+    #install-dismiss:hover { color: var(--pink); }
+
+    /* ── Header ── */
+    header {
+      text-align: center;
+      padding: 14px 0 6px;
+    }
+    header h1 {
+      font-size: 2rem;
+      font-weight: 800;
+      background: linear-gradient(130deg, #a855f7 0%, #ec4899 100%);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
+      letter-spacing: -0.02em;
+    }
+    header .subtitle {
+      color: var(--muted);
+      font-size: 0.82rem;
+      margin-top: 3px;
+      letter-spacing: 0.06em;
+    }
+
+    /* ── Generic card ── */
+    .card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 18px 18px 20px;
+    }
+    .card-title {
+      font-size: 0.68rem;
+      font-weight: 700;
+      letter-spacing: 0.12em;
+      color: var(--muted);
+      text-transform: uppercase;
+      margin-bottom: 14px;
+    }
+
+    /* ── Progress card ── */
+    #progress-word-display {
+      display: flex;
+      align-items: baseline;
+      gap: 7px;
+      margin-bottom: 13px;
+    }
+    #progress-current {
+      font-size: 2.5rem;
+      font-weight: 800;
+      color: var(--fg);
+      font-variant-numeric: tabular-nums;
+      line-height: 1;
+    }
+    .progress-goal-text {
+      font-size: 1rem;
+      color: var(--muted);
+      font-weight: 500;
+    }
+    #progress-bar-wrap {
+      position: relative;
+      height: 20px;
+      background: var(--input-bg);
+      border-radius: 100px;
+      overflow: hidden;
+      margin-bottom: 9px;
+    }
+    #progress-fill {
+      height: 100%;
+      border-radius: 100px;
+      background: linear-gradient(90deg, #a855f7, #ec4899);
+      transition: width 0.9s cubic-bezier(0.4, 0, 0.2, 1);
+      min-width: 0;
+      position: relative;
+    }
+    #progress-fill::after {
+      content: '';
+      position: absolute;
+      inset: 0;
+      background: linear-gradient(90deg,
+        transparent 0%, rgba(255,255,255,0.22) 50%, transparent 100%);
+      animation: shine 2.4s linear infinite;
+    }
+    @keyframes shine {
+      from { transform: translateX(-100%); }
+      to   { transform: translateX(300%); }
+    }
+    #milestone-markers {
+      position: absolute;
+      inset: 0;
+      pointer-events: none;
+    }
+    .m-marker {
+      position: absolute;
+      top: 0; bottom: 0;
+      width: 2px;
+      background: rgba(255,255,255,0.15);
+      transform: translateX(-50%);
+    }
+    #progress-footer {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 10px;
+    }
+    #progress-pct {
+      font-size: 0.83rem;
+      font-weight: 700;
+      color: var(--purple);
+    }
+    #progress-remaining {
+      font-size: 0.78rem;
+      color: var(--muted);
+    }
+    #progress-message {
+      font-size: 0.9rem;
+      color: var(--gold);
+      text-align: center;
+      font-style: italic;
+      min-height: 1.3em;
+      line-height: 1.4;
+    }
+
+    /* pulse on update */
+    @keyframes num-pulse {
+      0%   { transform: scale(1); }
+      40%  { transform: scale(1.08); color: var(--purple); }
+      100% { transform: scale(1); }
+    }
+    .pulsing { animation: num-pulse 0.5s ease; }
+
+    /* ── Stats strip ── */
+    #stats-strip {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 10px;
+    }
+    .stat-card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      padding: 14px 8px 12px;
+      text-align: center;
+    }
+    .stat-value {
+      display: block;
+      font-size: 1.55rem;
+      font-weight: 800;
+      color: var(--purple);
+      font-variant-numeric: tabular-nums;
+      line-height: 1.1;
+    }
+    .stat-label {
+      display: block;
+      font-size: 0.62rem;
+      color: var(--muted);
+      letter-spacing: 0.07em;
+      text-transform: uppercase;
+      margin-top: 3px;
+    }
+
+    /* ── Log form ── */
+    .field { margin-bottom: 14px; }
+    .field label {
+      display: block;
+      font-size: 0.76rem;
+      font-weight: 600;
+      color: var(--muted);
+      letter-spacing: 0.07em;
+      text-transform: uppercase;
+      margin-bottom: 6px;
+    }
+    .field input[type="number"] {
+      width: 100%;
+      background: var(--input-bg);
+      border: 1.5px solid var(--border);
+      border-radius: var(--radius-sm);
+      color: var(--fg);
+      font-size: 1.45rem;
+      font-weight: 700;
+      padding: 11px 14px;
+      outline: none;
+      font-family: inherit;
+      -moz-appearance: textfield;
+      transition: border-color 0.2s;
+    }
+    .field input[type="number"]::-webkit-inner-spin-button,
+    .field input[type="number"]::-webkit-outer-spin-button { -webkit-appearance: none; }
+    .field input[type="number"]:focus  { border-color: var(--purple); }
+    .field input[type="number"].error  { border-color: var(--red) !important; }
+
+    #time-row {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    #time-row input[type="number"] {
+      width: 76px;
+      flex-shrink: 0;
+    }
+    .time-unit {
+      font-size: 0.85rem;
+      color: var(--muted);
+      font-weight: 600;
+    }
+
+    #error-msg {
+      font-size: 0.78rem;
+      color: var(--red);
+      min-height: 1.2em;
+      margin-bottom: 6px;
+    }
+    #log-btn {
+      width: 100%;
+      background: linear-gradient(130deg, #a855f7, #ec4899);
+      border: none;
+      border-radius: var(--radius-sm);
+      color: #fff;
+      font-size: 1rem;
+      font-weight: 700;
+      padding: 14px;
+      cursor: pointer;
+      font-family: inherit;
+      letter-spacing: 0.03em;
+      transition: opacity 0.15s, transform 0.1s;
+    }
+    #log-btn:hover  { opacity: 0.9; }
+    #log-btn:active { opacity: 0.8; transform: scale(0.98); }
+
+    /* ── Milestones ── */
+    #milestone-badges {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+    }
+    .badge {
+      display: flex;
+      align-items: center;
+      gap: 5px;
+      padding: 7px 13px;
+      border-radius: 100px;
+      font-size: 0.78rem;
+      font-weight: 700;
+      letter-spacing: 0.02em;
+      border: 1.5px solid;
+      transition: all 0.35s;
+      user-select: none;
+    }
+    .badge.locked {
+      border-color: rgba(139,123,168,0.3);
+      color: rgba(139,123,168,0.5);
+      background: transparent;
+    }
+    .badge.reached {
+      border-color: var(--gold);
+      color: var(--gold);
+      background: rgba(245,158,11,0.1);
+    }
+    .badge.complete {
+      border-color: var(--purple);
+      color: var(--fg);
+      background: linear-gradient(130deg,
+        rgba(168,85,247,0.2), rgba(236,72,153,0.2));
+      animation: badge-glow 2s ease-in-out infinite alternate;
+    }
+    @keyframes badge-glow {
+      from { box-shadow: 0 0 6px rgba(168,85,247,0.3); }
+      to   { box-shadow: 0 0 18px rgba(168,85,247,0.7); }
+    }
+
+    /* ── History ── */
+    #history-list {
+      display: flex;
+      flex-direction: column;
+      gap: 7px;
+    }
+    .history-empty {
+      color: var(--muted);
+      font-size: 0.85rem;
+      text-align: center;
+      padding: 18px 0;
+      font-style: italic;
+    }
+    .history-item {
+      display: grid;
+      grid-template-columns: 1fr auto auto auto;
+      align-items: center;
+      gap: 8px;
+      background: var(--card2);
+      border-radius: var(--radius-sm);
+      padding: 10px 14px;
+    }
+    .h-date  { color: var(--muted); font-size: 0.78rem; }
+    .h-words { font-weight: 700; font-variant-numeric: tabular-nums; font-size: 0.88rem; }
+    .h-words.pos  { color: var(--green); }
+    .h-words.neg  { color: var(--red); }
+    .h-words.zero { color: var(--muted); }
+    .h-time  { color: var(--muted); font-size: 0.76rem; white-space: nowrap; }
+    .h-pace  { color: var(--purple); font-size: 0.72rem; white-space: nowrap; }
+
+    /* ── Celebration modal ── */
+    #celebrate-overlay {
+      display: none;
+      position: fixed;
+      inset: 0;
+      background: rgba(10,5,25,0.82);
+      z-index: 900;
+      align-items: center;
+      justify-content: center;
+      padding: 20px;
+      backdrop-filter: blur(6px);
+    }
+    #celebrate-overlay.open { display: flex; }
+    #celebrate-panel {
+      background: var(--card);
+      border: 2px solid var(--purple);
+      border-radius: 22px;
+      padding: 34px 26px 28px;
+      text-align: center;
+      max-width: 340px;
+      width: 100%;
+      box-shadow: 0 0 70px rgba(168,85,247,0.35);
+      animation: pop-in 0.4s cubic-bezier(0.34,1.56,0.64,1);
+    }
+    @keyframes pop-in {
+      from { transform: scale(0.45); opacity: 0; }
+      to   { transform: scale(1);    opacity: 1; }
+    }
+    #celebrate-emoji {
+      font-size: 3.8rem;
+      line-height: 1;
+      margin-bottom: 10px;
+    }
+    #celebrate-title {
+      font-size: 1.65rem;
+      font-weight: 800;
+      background: linear-gradient(130deg, #a855f7, #ec4899);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
+      margin-bottom: 8px;
+    }
+    #celebrate-message {
+      color: var(--fg);
+      font-size: 0.96rem;
+      line-height: 1.55;
+      margin-bottom: 16px;
+    }
+    #celebrate-info {
+      background: var(--input-bg);
+      border-radius: var(--radius-sm);
+      padding: 12px 14px;
+      margin-bottom: 18px;
+      font-size: 0.85rem;
+    }
+    .c-info-row {
+      display: flex;
+      justify-content: space-between;
+      padding: 3px 0;
+    }
+    .c-info-label { color: var(--muted); }
+    .c-info-value { color: var(--fg); font-weight: 700; }
+    #celebrate-close {
+      width: 100%;
+      background: linear-gradient(130deg, #a855f7, #ec4899);
+      border: none;
+      border-radius: var(--radius-sm);
+      color: #fff;
+      font-size: 1rem;
+      font-weight: 700;
+      padding: 13px;
+      cursor: pointer;
+      font-family: inherit;
+      transition: opacity 0.15s;
+    }
+    #celebrate-close:hover  { opacity: 0.9; }
+    #celebrate-close:active { opacity: 0.8; }
+
+    /* ── Toast ── */
+    #toast {
+      position: fixed;
+      bottom: 22px;
+      left: 50%;
+      transform: translateX(-50%) translateY(70px);
+      background: var(--card2);
+      border: 1px solid var(--border);
+      border-radius: 100px;
+      padding: 9px 20px;
+      font-size: 0.83rem;
+      font-weight: 600;
+      color: var(--fg);
+      z-index: 800;
+      white-space: nowrap;
+      pointer-events: none;
+      transition: transform 0.3s cubic-bezier(0.34,1.56,0.64,1);
+    }
+    #toast.show { transform: translateX(-50%) translateY(0); }
+
+    /* ── Responsive ── */
+    @media (max-width: 360px) {
+      #progress-current { font-size: 2rem; }
+      .stat-value       { font-size: 1.3rem; }
+    }
+  </style>
+</head>
+<body>
+
+<canvas id="confetti-canvas"></canvas>
+
+<div id="app">
+
+  <!-- Install prompt -->
+  <div id="install-bar">
+    <p>Add Plotting to your home screen!</p>
+    <button id="install-btn">Install</button>
+    <button id="install-dismiss" aria-label="Dismiss">×</button>
+  </div>
+
+  <!-- Header -->
+  <header>
+    <h1>✦ Plotting</h1>
+    <p class="subtitle">Your novel, one word at a time</p>
+  </header>
+
+  <!-- Progress card -->
+  <div class="card" id="progress-card">
+    <div class="card-title">Novel Progress</div>
+    <div id="progress-word-display">
+      <span id="progress-current">0</span>
+      <span class="progress-goal-text">/ 80,000 words</span>
+    </div>
+    <div id="progress-bar-wrap">
+      <div id="progress-fill" style="width:0%"></div>
+      <div id="milestone-markers"></div>
+    </div>
+    <div id="progress-footer">
+      <span id="progress-pct">0%</span>
+      <span id="progress-remaining">80,000 words to go</span>
+    </div>
+    <div id="progress-message">Start your first session below ✨</div>
+  </div>
+
+  <!-- Stats strip -->
+  <div id="stats-strip">
+    <div class="stat-card">
+      <span class="stat-value" id="stat-sessions">0</span>
+      <span class="stat-label">Sessions</span>
+    </div>
+    <div class="stat-card">
+      <span class="stat-value" id="stat-streak">0</span>
+      <span class="stat-label">Day Streak 🔥</span>
+    </div>
+    <div class="stat-card">
+      <span class="stat-value" id="stat-avg">—</span>
+      <span class="stat-label">Avg Words</span>
+    </div>
+  </div>
+
+  <!-- Log session card -->
+  <div class="card">
+    <div class="card-title">Log Your Session</div>
+    <div class="field">
+      <label for="word-input">Total words in your novel</label>
+      <input type="number" id="word-input" inputmode="numeric"
+             min="0" max="500000" placeholder="e.g. 5,240"
+             autocomplete="off" />
+    </div>
+    <div class="field">
+      <label>Time you spent writing</label>
+      <div id="time-row">
+        <input type="number" id="hours-input" inputmode="numeric"
+               min="0" max="23" placeholder="0" autocomplete="off" />
+        <span class="time-unit">hr</span>
+        <input type="number" id="mins-input" inputmode="numeric"
+               min="0" max="59" placeholder="30" autocomplete="off" />
+        <span class="time-unit">min</span>
+      </div>
+    </div>
+    <div id="error-msg" role="alert" aria-live="polite"></div>
+    <button id="log-btn">Log Session ✨</button>
+  </div>
+
+  <!-- Milestones card -->
+  <div class="card">
+    <div class="card-title">Milestones</div>
+    <div id="milestone-badges"></div>
+  </div>
+
+  <!-- History card -->
+  <div class="card">
+    <div class="card-title">Writing History</div>
+    <div id="history-list"></div>
+  </div>
+
+</div>
+
+<!-- Celebration modal -->
+<div id="celebrate-overlay" role="dialog" aria-modal="true" aria-labelledby="celebrate-title">
+  <div id="celebrate-panel">
+    <div id="celebrate-emoji">🎉</div>
+    <h2 id="celebrate-title">Great session!</h2>
+    <p id="celebrate-message">Keep up the amazing work!</p>
+    <div id="celebrate-info"></div>
+    <button id="celebrate-close">Keep Writing! ✨</button>
+  </div>
+</div>
+
+<div id="toast" role="status" aria-live="polite"></div>
+
+<script>
+'use strict';
+
+// ── Constants ──────────────────────────────────────────────────────────
+const GOAL        = 80000;
+const STORAGE_KEY = 'plotting_sessions';
+
+const MILESTONES = [
+  { words: 10000, label: '10K',    emoji: '🌱', short: 'Ten thousand words! Your story is alive!' },
+  { words: 25000, label: '25K',    emoji: '🌿', short: 'A quarter done! You\'re on fire! 🔥' },
+  { words: 50000, label: '50K ⭐', emoji: '⭐', short: 'HALFWAY THERE! This is incredible!' },
+  { words: 75000, label: '75K',    emoji: '🌟', short: 'Three quarters! The finish line is in sight!' },
+  { words: 80000, label: '80K ✦', emoji: '🎊', short: 'YOU FINISHED YOUR NOVEL! This is everything!' },
+];
+
+const CONFETTI_COLORS = [
+  '#a855f7','#ec4899','#f59e0b','#34d399','#60a5fa','#f0e6ff','#fbbf24','#fb7185',
+];
+
+// ── Data helpers ───────────────────────────────────────────────────────
+function loadSessions() {
+  try { return JSON.parse(localStorage.getItem(STORAGE_KEY) || '[]'); }
+  catch { return []; }
+}
+
+function saveSessions(sessions) {
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(sessions));
+}
+
+// ── Date helpers ───────────────────────────────────────────────────────
+function todayStr() {
+  return new Date().toISOString().slice(0, 10);
+}
+
+function dayOffsetStr(offset) {
+  const d = new Date();
+  d.setDate(d.getDate() + offset);
+  return d.toISOString().slice(0, 10);
+}
+
+function formatDate(dateStr) {
+  if (dateStr === todayStr())        return 'Today';
+  if (dateStr === dayOffsetStr(-1))  return 'Yesterday';
+  const d = new Date(dateStr + 'T00:00:00');
+  return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+}
+
+function formatNum(n) {
+  return Math.abs(n).toLocaleString('en-US');
+}
+
+function formatTime(mins) {
+  if (mins < 60) return `${mins}m`;
+  const h = Math.floor(mins / 60);
+  const m = mins % 60;
+  return m ? `${h}h ${m}m` : `${h}h`;
+}
+
+// ── Stats ──────────────────────────────────────────────────────────────
+function computeStreak(sessions) {
+  if (!sessions.length) return 0;
+  const today = todayStr();
+  const yesterday = dayOffsetStr(-1);
+  const dates = [...new Set(sessions.map(s => s.date))].sort().reverse();
+  if (dates[0] !== today && dates[0] !== yesterday) return 0;
+  let streak = 1;
+  for (let i = 1; i < dates.length; i++) {
+    const d1 = new Date(dates[i - 1] + 'T00:00:00');
+    const d2 = new Date(dates[i]     + 'T00:00:00');
+    if (Math.round((d1 - d2) / 86400000) === 1) streak++;
+    else break;
+  }
+  return streak;
+}
+
+function computeStats() {
+  const sessions = loadSessions();
+  const totalWords = sessions.length ? sessions[sessions.length - 1].totalWords : 0;
+  const posSessions = sessions.filter(s => s.wordsAdded > 0);
+  const avgWords = posSessions.length
+    ? Math.round(posSessions.reduce((a, s) => a + s.wordsAdded, 0) / posSessions.length)
+    : 0;
+  return {
+    totalWords,
+    count:    sessions.length,
+    streak:   computeStreak(sessions),
+    avgWords,
+  };
+}
+
+// ── Progress messages ──────────────────────────────────────────────────
+function progressMessage(w) {
+  const p = w / GOAL;
+  if (w === 0)   return 'Start your first session below ✨';
+  if (p < 0.05)  return 'The adventure begins! Every word counts ✨';
+  if (p < 0.15)  return 'Your story is waking up — keep going 🌱';
+  if (p < 0.25)  return 'Your world is taking shape! 🌿';
+  if (p < 0.40)  return 'You\'re finding your rhythm! 💫';
+  if (p < 0.50)  return 'Almost halfway — you\'re really doing this! ⭐';
+  if (p < 0.65)  return 'Past the halfway point! Your characters are proud of you ⭐';
+  if (p < 0.75)  return 'Three quarters soon — the end is getting closer! 🔥';
+  if (p < 0.90)  return 'The final stretch — push through! 🌟';
+  if (p < 1.00)  return 'SO CLOSE! Don\'t stop now! 🚀';
+  return '✦ NOVEL COMPLETE! You wrote an entire book! ✦';
+}
+
+// ── Session celebration messages ───────────────────────────────────────
+function sessionCelebration(wordsAdded) {
+  if (wordsAdded <= 0)   return { title: 'Editing day!',    emoji: '📝',
+    msg: 'Every revision makes your story shine. That\'s real craft.' };
+  if (wordsAdded < 300)  return { title: 'Good session!',   emoji: '🌱',
+    msg: 'Every word you write is one that didn\'t exist before. Keep going!' };
+  if (wordsAdded < 700)  return { title: 'Nice work!',      emoji: '✨',
+    msg: 'Solid writing! Your story is growing one session at a time.' };
+  if (wordsAdded < 1200) return { title: 'Great session!',  emoji: '⭐',
+    msg: `${formatNum(wordsAdded)} words! You\'re making real progress.` };
+  if (wordsAdded < 2000) return { title: 'Amazing!',        emoji: '🌟',
+    msg: `${formatNum(wordsAdded)} words — you are absolutely on fire today!` };
+  if (wordsAdded < 3000) return { title: 'Incredible!',     emoji: '🔥',
+    msg: `${formatNum(wordsAdded)} words?! That\'s a legendary session!` };
+  return                        { title: '🔥 LEGENDARY! 🔥', emoji: '🚀',
+    msg: `${formatNum(wordsAdded)} WORDS?! You completely crushed it today!` };
+}
+
+// ── Confetti ───────────────────────────────────────────────────────────
+class Particle {
+  constructor(x, y) {
+    this.x = x;
+    this.y = y;
+    const angle = (Math.random() * 220 - 200) * Math.PI / 180;
+    const spd   = Math.random() * 11 + 5;
+    this.vx      = Math.cos(angle) * spd;
+    this.vy      = Math.sin(angle) * spd;
+    this.gravity = 0.26;
+    this.drag    = 0.984;
+    this.rot     = Math.random() * 360;
+    this.rotv    = (Math.random() - 0.5) * 14;
+    this.w       = Math.random() * 10 + 4;
+    this.h       = Math.random() * 6  + 3;
+    this.color   = CONFETTI_COLORS[Math.floor(Math.random() * CONFETTI_COLORS.length)];
+    this.circle  = Math.random() < 0.2;
+    this.alpha   = 1;
+  }
+  update() {
+    this.vx *= this.drag; this.vy *= this.drag;
+    this.vy += this.gravity;
+    this.x  += this.vx;   this.y  += this.vy;
+    this.rot += this.rotv;
+  }
+  draw(ctx) {
+    ctx.save();
+    ctx.globalAlpha = Math.max(0, this.alpha);
+    ctx.translate(this.x, this.y);
+    ctx.rotate(this.rot * Math.PI / 180);
+    ctx.fillStyle = this.color;
+    if (this.circle) {
+      ctx.beginPath();
+      ctx.arc(0, 0, this.w / 2, 0, Math.PI * 2);
+      ctx.fill();
+    } else {
+      ctx.fillRect(-this.w / 2, -this.h / 2, this.w, this.h);
+    }
+    ctx.restore();
+  }
+}
+
+let confettiRaf = null;
+
+function launchConfetti(big = false) {
+  const canvas = document.getElementById('confetti-canvas');
+  const ctx    = canvas.getContext('2d');
+  canvas.width  = window.innerWidth;
+  canvas.height = window.innerHeight;
+  canvas.style.display = 'block';
+
+  const count    = big ? 280 : 130;
+  const duration = big ? 5500 : 3200;
+  const particles = [];
+
+  // Burst from several origin points for a fuller effect
+  const origins = big
+    ? [[0.2,0.7],[0.5,0.75],[0.8,0.7],[0.35,0.65],[0.65,0.65]]
+    : [[0.3,0.72],[0.5,0.75],[0.7,0.72]];
+
+  for (let i = 0; i < count; i++) {
+    const [ox, oy] = origins[i % origins.length];
+    particles.push(new Particle(
+      canvas.width  * ox + (Math.random() - 0.5) * 40,
+      canvas.height * oy + (Math.random() - 0.5) * 20,
+    ));
+  }
+
+  if (confettiRaf) cancelAnimationFrame(confettiRaf);
+  const start = performance.now();
+
+  function frame(now) {
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    const elapsed = now - start;
+    const fadeStart = duration - 1200;
+    let alive = false;
+    for (const p of particles) {
+      p.update();
+      if (elapsed > fadeStart) p.alpha -= 0.014;
+      if (p.alpha > 0 && p.y < canvas.height + 50) {
+        alive = true;
+        p.draw(ctx);
+      }
+    }
+    if (alive && elapsed < duration + 600) {
+      confettiRaf = requestAnimationFrame(frame);
+    } else {
+      canvas.style.display = 'none';
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+    }
+  }
+  confettiRaf = requestAnimationFrame(frame);
+}
+
+// ── Render ─────────────────────────────────────────────────────────────
+function render(animateProgress = false) {
+  const sessions = loadSessions();
+  const { totalWords, count, streak, avgWords } = computeStats();
+
+  // Progress bar
+  const pct = Math.min(100, (totalWords / GOAL) * 100);
+  document.getElementById('progress-fill').style.width = pct + '%';
+  document.getElementById('progress-pct').textContent  = pct.toFixed(1) + '%';
+
+  const remaining = Math.max(0, GOAL - totalWords);
+  document.getElementById('progress-remaining').textContent =
+    remaining > 0 ? `${formatNum(remaining)} to go` : 'Goal reached! 🎊';
+  document.getElementById('progress-message').textContent = progressMessage(totalWords);
+
+  // Animate the word counter
+  const currentEl = document.getElementById('progress-current');
+  if (animateProgress) {
+    const from = parseInt(currentEl.dataset.value || '0', 10);
+    animateCount(currentEl, from, totalWords, 900);
+  } else {
+    currentEl.textContent = formatNum(totalWords);
+  }
+  currentEl.dataset.value = totalWords;
+
+  // Stats
+  document.getElementById('stat-sessions').textContent = count;
+  document.getElementById('stat-streak').textContent   = streak;
+  document.getElementById('stat-avg').textContent      = avgWords > 0 ? formatNum(avgWords) : '—';
+
+  // Milestone markers
+  renderMarkers();
+  renderMilestones(totalWords);
+  renderHistory(sessions);
+}
+
+function animateCount(el, from, to, duration) {
+  const start = performance.now();
+  function step(now) {
+    const t = Math.min((now - start) / duration, 1);
+    const ease = 1 - Math.pow(1 - t, 3);
+    const val = Math.round(from + (to - from) * ease);
+    el.textContent = formatNum(val);
+    if (t < 1) requestAnimationFrame(step);
+    else el.textContent = formatNum(to);
+  }
+  requestAnimationFrame(step);
+}
+
+function renderMarkers() {
+  const container = document.getElementById('milestone-markers');
+  container.innerHTML = '';
+  for (const m of MILESTONES) {
+    const pct = (m.words / GOAL) * 100;
+    const dot = document.createElement('div');
+    dot.className    = 'm-marker';
+    dot.style.left   = pct + '%';
+    dot.title        = m.label;
+    container.appendChild(dot);
+  }
+}
+
+function renderMilestones(totalWords) {
+  const container = document.getElementById('milestone-badges');
+  container.innerHTML = '';
+  for (const m of MILESTONES) {
+    const reached   = totalWords >= m.words;
+    const isGoal    = m.words === GOAL;
+    const badge     = document.createElement('div');
+    badge.className = 'badge ' +
+      (reached ? (isGoal ? 'complete' : 'reached') : 'locked');
+    badge.textContent = (reached ? '✓ ' : '') + m.label;
+    container.appendChild(badge);
+  }
+}
+
+function renderHistory(sessions) {
+  const list = document.getElementById('history-list');
+  list.innerHTML = '';
+  if (!sessions.length) {
+    const p = document.createElement('p');
+    p.className   = 'history-empty';
+    p.textContent = 'No sessions yet — start writing! 📖';
+    list.appendChild(p);
+    return;
+  }
+  const items = [...sessions].reverse().slice(0, 30);
+  for (const s of items) {
+    const sign    = s.wordsAdded > 0 ? '+' : '';
+    const wClass  = s.wordsAdded > 0 ? 'pos' : (s.wordsAdded < 0 ? 'neg' : 'zero');
+    const pace    = s.sessionMinutes > 0 && s.wordsAdded > 0
+      ? formatNum(Math.round((s.wordsAdded / s.sessionMinutes) * 60)) + '/hr'
+      : '';
+    const item = document.createElement('div');
+    item.className = 'history-item';
+    item.innerHTML =
+      `<span class="h-date">${formatDate(s.date)}</span>` +
+      `<span class="h-words ${wClass}">${sign}${formatNum(s.wordsAdded)}</span>` +
+      `<span class="h-time">${formatTime(s.sessionMinutes)}</span>` +
+      `<span class="h-pace">${pace}</span>`;
+    list.appendChild(item);
+  }
+}
+
+// ── Celebration modal ──────────────────────────────────────────────────
+function showCelebration({ title, emoji, msg, info, big }) {
+  document.getElementById('celebrate-emoji').textContent   = emoji;
+  document.getElementById('celebrate-title').textContent   = title;
+  document.getElementById('celebrate-message').textContent = msg;
+
+  const infoEl = document.getElementById('celebrate-info');
+  if (info && info.length) {
+    infoEl.style.display = '';
+    infoEl.innerHTML = info.map(([lbl, val]) =>
+      `<div class="c-info-row">` +
+        `<span class="c-info-label">${lbl}</span>` +
+        `<span class="c-info-value">${val}</span>` +
+      `</div>`
+    ).join('');
+  } else {
+    infoEl.style.display = 'none';
+  }
+  document.getElementById('celebrate-overlay').classList.add('open');
+  launchConfetti(big);
+}
+
+document.getElementById('celebrate-close').addEventListener('click', () => {
+  document.getElementById('celebrate-overlay').classList.remove('open');
+});
+document.getElementById('celebrate-overlay').addEventListener('click', e => {
+  if (e.target === e.currentTarget)
+    document.getElementById('celebrate-overlay').classList.remove('open');
+});
+
+// ── Toast ──────────────────────────────────────────────────────────────
+let toastTimer = null;
+function showToast(msg) {
+  const toast = document.getElementById('toast');
+  toast.textContent = msg;
+  toast.classList.add('show');
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => toast.classList.remove('show'), 2600);
+}
+
+// ── Log session ────────────────────────────────────────────────────────
+function handleLog() {
+  const wordEl  = document.getElementById('word-input');
+  const hoursEl = document.getElementById('hours-input');
+  const minsEl  = document.getElementById('mins-input');
+  const errEl   = document.getElementById('error-msg');
+
+  wordEl.classList.remove('error');
+  hoursEl.classList.remove('error');
+  minsEl.classList.remove('error');
+  errEl.textContent = '';
+
+  const totalWords     = parseInt(wordEl.value, 10);
+  const hours          = parseInt(hoursEl.value, 10) || 0;
+  const mins           = parseInt(minsEl.value, 10)  || 0;
+  const sessionMinutes = hours * 60 + mins;
+
+  if (!wordEl.value.trim() || isNaN(totalWords) || totalWords < 0) {
+    wordEl.classList.add('error');
+    errEl.textContent = 'Please enter the total word count of your novel.';
+    wordEl.focus();
+    return;
+  }
+  if (sessionMinutes <= 0) {
+    errEl.textContent = 'Please enter how long you spent writing (at least 1 minute).';
+    hoursEl.focus();
+    return;
+  }
+  if (totalWords > 500000) {
+    wordEl.classList.add('error');
+    errEl.textContent = 'That seems too high — did you mean fewer words?';
+    return;
+  }
+
+  const sessions = loadSessions();
+  const prevTotal  = sessions.length ? sessions[sessions.length - 1].totalWords : 0;
+  const wordsAdded = totalWords - prevTotal;
+
+  // Detect crossed milestones
+  const crossed = MILESTONES.filter(m => prevTotal < m.words && totalWords >= m.words);
+
+  sessions.push({
+    id:             Date.now(),
+    date:           todayStr(),
+    totalWords,
+    sessionMinutes,
+    wordsAdded,
+  });
+  saveSessions(sessions);
+
+  // Clear inputs
+  wordEl.value = hoursEl.value = minsEl.value = '';
+
+  // Re-render with animation
+  render(true);
+
+  // Build session info rows
+  const info = [
+    ['Words written',  (wordsAdded >= 0 ? '+' : '') + formatNum(wordsAdded)],
+    ['Time spent',     formatTime(sessionMinutes)],
+    ['Novel total',    formatNum(totalWords) + ' words'],
+    ['Goal progress',  ((totalWords / GOAL) * 100).toFixed(1) + '%'],
+  ];
+
+  // Pick celebration content
+  if (crossed.length) {
+    // Show the highest crossed milestone
+    const highest = crossed[crossed.length - 1];
+    showCelebration({
+      title: `${highest.label} reached!`,
+      emoji: highest.emoji,
+      msg:   highest.short,
+      info,
+      big:   true,
+    });
+  } else {
+    const cel = sessionCelebration(wordsAdded);
+    showCelebration({ ...cel, info, big: false });
+  }
+}
+
+document.getElementById('log-btn').addEventListener('click', handleLog);
+
+// Allow Enter key on any input to submit
+['word-input','hours-input','mins-input'].forEach(id => {
+  document.getElementById(id).addEventListener('keydown', e => {
+    if (e.key === 'Enter') handleLog();
+  });
+});
+
+// ── PWA install ────────────────────────────────────────────────────────
+let deferredInstall = null;
+window.addEventListener('beforeinstallprompt', e => {
+  e.preventDefault();
+  deferredInstall = e;
+  document.getElementById('install-bar').classList.add('visible');
+});
+
+document.getElementById('install-btn').addEventListener('click', async () => {
+  if (!deferredInstall) return;
+  deferredInstall.prompt();
+  const { outcome } = await deferredInstall.userChoice;
+  if (outcome === 'accepted')
+    document.getElementById('install-bar').classList.remove('visible');
+  deferredInstall = null;
+});
+
+document.getElementById('install-dismiss').addEventListener('click', () => {
+  document.getElementById('install-bar').classList.remove('visible');
+});
+
+// ── Service Worker ─────────────────────────────────────────────────────
+if ('serviceWorker' in navigator) {
+  navigator.serviceWorker.register('./sw.js').catch(() => {});
+}
+
+// ── Init ───────────────────────────────────────────────────────────────
+render();
+</script>
+</body>
+</html>
