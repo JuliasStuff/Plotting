@@ -117,6 +117,34 @@
       letter-spacing: 0.06em;
     }
 
+    /* ── Sync indicator ── */
+    #sync-row {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+      margin-top: 6px;
+      font-size: 0.72rem;
+      color: var(--muted);
+      letter-spacing: 0.02em;
+      min-height: 14px;
+    }
+    .sync-dot {
+      width: 7px;
+      height: 7px;
+      border-radius: 50%;
+      background: #555;
+      flex-shrink: 0;
+    }
+    .sync-dot.off        { background: #555; }
+    .sync-dot.connecting { background: var(--gold);  animation: sync-pulse 1.2s ease-in-out infinite; }
+    .sync-dot.connected  { background: var(--green); }
+    .sync-dot.error      { background: var(--red); }
+    @keyframes sync-pulse {
+      0%, 100% { opacity: 0.4; }
+      50%      { opacity: 1; }
+    }
+
     /* ── Generic card ── */
     .card {
       background: var(--card);
@@ -515,6 +543,10 @@
   <header>
     <h1>✦ Plotting</h1>
     <p class="subtitle">Your novel, one word at a time</p>
+    <div id="sync-row">
+      <span id="sync-dot" class="sync-dot off" aria-hidden="true"></span>
+      <span id="sync-status">Local only</span>
+    </div>
   </header>
 
   <!-- Progress card -->
@@ -629,6 +661,136 @@ function loadSessions() {
 
 function saveSessions(sessions) {
   localStorage.setItem(STORAGE_KEY, JSON.stringify(sessions));
+  pushRemote(sessions); // fire-and-forget cross-device sync
+}
+
+// ── Cross-device sync (JSONBin.io) ─────────────────────────────────────
+// Sign up free at https://jsonbin.io, create a bin with initial content {},
+// then paste your IDs below to enable cross-device sync.
+const JSONBIN_BIN_ID     = 'REPLACE_WITH_BIN_ID';
+const JSONBIN_ACCESS_KEY = 'REPLACE_WITH_ACCESS_KEY';
+const JSONBIN_URL        = `https://api.jsonbin.io/v3/b/${JSONBIN_BIN_ID}`;
+
+function syncEnabled() {
+  return JSONBIN_BIN_ID && !JSONBIN_BIN_ID.startsWith('REPLACE_')
+      && JSONBIN_ACCESS_KEY && !JSONBIN_ACCESS_KEY.startsWith('REPLACE_');
+}
+
+function setSyncDot(state) {
+  const dot = document.getElementById('sync-dot');
+  if (dot) dot.className = 'sync-dot ' + state;
+}
+
+function setSyncStatus(text) {
+  const el = document.getElementById('sync-status');
+  if (el) el.textContent = text;
+}
+
+function formatSyncTime(d) {
+  return d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
+}
+
+// Merge two session arrays into one, deduping by id and preferring the
+// entry with the most recent totalWords reading for any duplicate id.
+function mergeSessions(a, b) {
+  const byId = new Map();
+  for (const s of [...a, ...b]) {
+    if (!s || typeof s.id === 'undefined') continue;
+    const existing = byId.get(s.id);
+    // Same id should mean the same logged session — keep the one with the
+    // larger totalWords (in practice they'll be identical).
+    if (!existing || (s.totalWords ?? 0) > (existing.totalWords ?? 0)) {
+      byId.set(s.id, s);
+    }
+  }
+  return [...byId.values()].sort((x, y) => x.id - y.id);
+}
+
+async function pullRemote() {
+  if (!syncEnabled()) return null;
+  try {
+    const res = await fetch(`${JSONBIN_URL}/latest`, {
+      headers: { 'X-Access-Key': JSONBIN_ACCESS_KEY },
+    });
+    if (!res.ok) return null;
+    const body = await res.json();
+    const bin  = body && body.record;
+    if (!bin || typeof bin !== 'object') return null;
+    return Array.isArray(bin.sessions) ? bin.sessions : null;
+  } catch { return null; }
+}
+
+let pushInFlight = null;
+let pushQueued   = null;
+
+async function pushRemote(sessions) {
+  if (!syncEnabled()) return;
+  // Coalesce rapid saves: if a push is already in flight, queue the latest
+  // payload and let the in-flight one chain into it.
+  if (pushInFlight) {
+    pushQueued = sessions;
+    return;
+  }
+  pushInFlight = (async () => {
+    try {
+      setSyncDot('connecting');
+      setSyncStatus('Sync: saving…');
+      await fetch(JSONBIN_URL, {
+        method:  'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Access-Key': JSONBIN_ACCESS_KEY,
+        },
+        body: JSON.stringify({ sessions }),
+      });
+      setSyncDot('connected');
+      setSyncStatus(`Sync: saved ${formatSyncTime(new Date())}`);
+    } catch {
+      setSyncDot('error');
+      setSyncStatus('Sync: save failed (kept locally)');
+    } finally {
+      pushInFlight = null;
+      if (pushQueued) {
+        const next = pushQueued;
+        pushQueued = null;
+        pushRemote(next);
+      }
+    }
+  })();
+}
+
+async function syncOnStartup() {
+  if (!syncEnabled()) {
+    setSyncDot('off');
+    setSyncStatus('Local only');
+    return;
+  }
+  setSyncDot('connecting');
+  setSyncStatus('Sync: connecting…');
+  const remote = await pullRemote();
+  if (remote === null) {
+    // Network error or no bin yet — try pushing local so the bin gets seeded.
+    setSyncDot('error');
+    setSyncStatus('Sync: offline (using local data)');
+    pushRemote(loadSessions());
+    return;
+  }
+  const local  = loadSessions();
+  const merged = mergeSessions(local, remote);
+  const mergedChanged =
+    merged.length !== local.length ||
+    JSON.stringify(merged) !== JSON.stringify(local);
+  if (mergedChanged) {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(merged));
+    if (typeof render === 'function') render();
+  }
+  setSyncDot('connected');
+  setSyncStatus(`Sync: connected • updated ${formatSyncTime(new Date())}`);
+  // Push merged back so remote reflects any local-only sessions.
+  const remoteChanged =
+    merged.length !== remote.length ||
+    JSON.stringify(merged) !== JSON.stringify(remote);
+  if (remoteChanged) pushRemote(merged);
 }
 
 // ── Date helpers ───────────────────────────────────────────────────────
@@ -1082,6 +1244,7 @@ if ('serviceWorker' in navigator) {
 
 // ── Init ───────────────────────────────────────────────────────────────
 render();
+syncOnStartup();
 </script>
 </body>
 </html>
