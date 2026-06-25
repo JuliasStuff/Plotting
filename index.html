@@ -391,11 +391,9 @@
       to   { box-shadow: 0 0 18px rgba(168,85,247,0.7); }
     }
 
-    /* ── History ── */
+    /* ── History (calendar grid) ── */
     #history-list {
-      display: flex;
-      flex-direction: column;
-      gap: 7px;
+      display: block;
     }
     .history-empty {
       color: var(--muted);
@@ -404,22 +402,75 @@
       padding: 18px 0;
       font-style: italic;
     }
-    .history-item {
+    .cal-grid {
       display: grid;
-      grid-template-columns: 1fr auto auto auto;
-      align-items: center;
-      gap: 8px;
-      background: var(--card2);
-      border-radius: var(--radius-sm);
-      padding: 10px 14px;
+      grid-template-columns: repeat(7, 1fr);
+      gap: 4px;
     }
-    .h-date  { color: var(--muted); font-size: 0.78rem; }
-    .h-words { font-weight: 700; font-variant-numeric: tabular-nums; font-size: 0.88rem; }
-    .h-words.pos  { color: var(--green); }
-    .h-words.neg  { color: var(--red); }
-    .h-words.zero { color: var(--muted); }
-    .h-time  { color: var(--muted); font-size: 0.76rem; white-space: nowrap; }
-    .h-pace  { color: var(--purple); font-size: 0.72rem; white-space: nowrap; }
+    .cal-dow {
+      text-align: center;
+      font-size: 0.62rem;
+      font-weight: 700;
+      color: var(--muted);
+      letter-spacing: 0.08em;
+      padding: 0 0 4px;
+    }
+    .cal-cell {
+      background: var(--card2);
+      border: 1px solid transparent;
+      border-radius: 9px;
+      padding: 5px 3px 6px;
+      min-height: 66px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      text-align: center;
+      font-variant-numeric: tabular-nums;
+      line-height: 1.15;
+    }
+    .cal-cell.future        { opacity: 0.25; }
+    .cal-cell.empty-past    { opacity: 0.55; }
+    .cal-cell.today {
+      border-color: var(--purple);
+      box-shadow: 0 0 0 1px rgba(168,85,247,0.35) inset;
+    }
+    .cal-day {
+      font-size: 0.62rem;
+      font-weight: 600;
+      color: var(--muted);
+      margin-bottom: 3px;
+    }
+    .cal-cell.today .cal-day  { color: var(--purple); }
+    .cal-day .cal-month {
+      color: var(--pink);
+      font-weight: 700;
+      margin-right: 2px;
+    }
+    .cal-words {
+      font-size: 0.82rem;
+      font-weight: 800;
+      letter-spacing: -0.01em;
+    }
+    .cal-words.pos { color: var(--green); }
+    .cal-words.neg { color: var(--red); }
+    .cal-time {
+      font-size: 0.6rem;
+      color: var(--muted);
+      margin-top: 2px;
+    }
+    .cal-pace {
+      font-size: 0.58rem;
+      color: var(--purple);
+      margin-top: 1px;
+      font-weight: 700;
+    }
+    @media (max-width: 380px) {
+      .cal-cell    { min-height: 60px; padding: 4px 2px; border-radius: 8px; }
+      .cal-words   { font-size: 0.72rem; }
+      .cal-time    { font-size: 0.55rem; }
+      .cal-pace    { font-size: 0.54rem; }
+      .cal-day     { font-size: 0.58rem; }
+    }
 
     /* ── Celebration modal ── */
     #celebrate-overlay {
@@ -1068,22 +1119,88 @@ function renderHistory(sessions) {
     list.appendChild(p);
     return;
   }
-  const items = [...sessions].reverse().slice(0, 30);
-  for (const s of items) {
-    const sign    = s.wordsAdded > 0 ? '+' : '';
-    const wClass  = s.wordsAdded > 0 ? 'pos' : (s.wordsAdded < 0 ? 'neg' : 'zero');
-    const pace    = s.sessionMinutes > 0 && s.wordsAdded > 0
-      ? formatNum(Math.round((s.wordsAdded / s.sessionMinutes) * 60)) + '/hr'
-      : '';
-    const item = document.createElement('div');
-    item.className = 'history-item';
-    item.innerHTML =
-      `<span class="h-date">${formatDate(s.date)}</span>` +
-      `<span class="h-words ${wClass}">${sign}${formatNum(s.wordsAdded)}</span>` +
-      `<span class="h-time">${formatTime(s.sessionMinutes)}</span>` +
-      `<span class="h-pace">${pace}</span>`;
-    list.appendChild(item);
+
+  // Aggregate sessions by date — a day can have multiple logged sessions.
+  const byDate = new Map();
+  for (const s of sessions) {
+    const e = byDate.get(s.date) || { words: 0, mins: 0 };
+    e.words += (s.wordsAdded     || 0);
+    e.mins  += (s.sessionMinutes || 0);
+    byDate.set(s.date, e);
   }
+
+  // Helper that mirrors todayStr()/dayOffsetStr() (UTC YYYY-MM-DD).
+  const dateStr = d => d.toISOString().slice(0, 10);
+
+  // Sunday-anchored week containing today (UTC, to match the rest of the app).
+  const todayKey = todayStr();
+  const sundayOfThisWeek = new Date(todayKey + 'T00:00:00Z');
+  sundayOfThisWeek.setUTCDate(
+    sundayOfThisWeek.getUTCDate() - sundayOfThisWeek.getUTCDay()
+  );
+
+  // Show enough weeks to cover from the earliest session up to this week,
+  // bounded between 6 and 16 weeks so the grid is always usable.
+  const sortedDates = [...byDate.keys()].sort();
+  const earliest = new Date(sortedDates[0] + 'T00:00:00Z');
+  const earliestSunday = new Date(earliest);
+  earliestSunday.setUTCDate(earliestSunday.getUTCDate() - earliestSunday.getUTCDay());
+  const weeksSpan = Math.round((sundayOfThisWeek - earliestSunday) / (7 * 86400000)) + 1;
+  const weeksToShow = Math.max(6, Math.min(16, weeksSpan));
+
+  const grid = document.createElement('div');
+  grid.className = 'cal-grid';
+
+  // Day-of-week header (Sun → Sat)
+  for (const lbl of ['S','M','T','W','T','F','S']) {
+    const h = document.createElement('div');
+    h.className = 'cal-dow';
+    h.textContent = lbl;
+    grid.appendChild(h);
+  }
+
+  // Rows: most recent week at the top, going back in time.
+  for (let w = 0; w < weeksToShow; w++) {
+    for (let d = 0; d < 7; d++) {
+      const cellDate = new Date(sundayOfThisWeek);
+      cellDate.setUTCDate(sundayOfThisWeek.getUTCDate() - w * 7 + d);
+      const cellKey  = dateStr(cellDate);
+      const data     = byDate.get(cellKey);
+      const isFuture = cellKey > todayKey;
+      const isToday  = cellKey === todayKey;
+      const isFirst  = cellDate.getUTCDate() === 1;
+      const hasData  = !!data && (data.words !== 0 || data.mins > 0);
+
+      const cell = document.createElement('div');
+      cell.className = 'cal-cell' +
+        (isFuture ? ' future'     : '') +
+        (isToday  ? ' today'      : '') +
+        (!hasData && !isFuture ? ' empty-past' : '');
+      cell.title = cellDate.toLocaleDateString('en-US', {
+        weekday: 'long', month: 'long', day: 'numeric', timeZone: 'UTC',
+      });
+
+      const dayNum = cellDate.getUTCDate();
+      const monthLbl = isFirst
+        ? `<span class="cal-month">${cellDate.toLocaleDateString('en-US', { month: 'short', timeZone: 'UTC' })}</span>`
+        : '';
+
+      let inner = `<div class="cal-day">${monthLbl}${dayNum}</div>`;
+      if (hasData) {
+        const sign = data.words > 0 ? '+' : '';
+        const cls  = data.words > 0 ? 'pos' : (data.words < 0 ? 'neg' : '');
+        const pace = (data.mins > 0 && data.words > 0)
+          ? formatNum(Math.round((data.words / data.mins) * 60)) + '/h'
+          : '';
+        inner += `<div class="cal-words ${cls}">${sign}${formatNum(data.words)}</div>`;
+        if (data.mins > 0) inner += `<div class="cal-time">${formatTime(data.mins)}</div>`;
+        if (pace)          inner += `<div class="cal-pace">${pace}</div>`;
+      }
+      cell.innerHTML = inner;
+      grid.appendChild(cell);
+    }
+  }
+  list.appendChild(grid);
 }
 
 // ── Celebration modal ──────────────────────────────────────────────────
