@@ -706,13 +706,43 @@ const CONFETTI_COLORS = [
 
 // ── Data helpers ───────────────────────────────────────────────────────
 function loadSessions() {
-  try { return JSON.parse(localStorage.getItem(STORAGE_KEY) || '[]'); }
+  try {
+    const raw = JSON.parse(localStorage.getItem(STORAGE_KEY) || '[]');
+    const changed = fixFutureSessionDates(raw);
+    if (changed) {
+      // Persist the correction so subsequent reads (and sync) are clean.
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(raw));
+      pushRemote(raw);
+    }
+    return raw;
+  }
   catch { return []; }
 }
 
 function saveSessions(sessions) {
   localStorage.setItem(STORAGE_KEY, JSON.stringify(sessions));
   pushRemote(sessions); // fire-and-forget cross-device sync
+}
+
+// Before todayStr() switched to PST, evening sessions were dated under the
+// next UTC date and now appear as "tomorrow" on the calendar. UTC is at most
+// one day ahead of PST, so any session dated exactly one day after today PST
+// is the misclassified previous-evening session — shift it back to today.
+// Returns true if anything was changed.
+function fixFutureSessionDates(sessions) {
+  if (!Array.isArray(sessions)) return false;
+  const today    = (typeof todayStr === 'function') ? todayStr() : null;
+  if (!today) return false;
+  const tomorrow = (typeof dayOffsetStr === 'function') ? dayOffsetStr(1) : null;
+  if (!tomorrow) return false;
+  let changed = false;
+  for (const s of sessions) {
+    if (s && s.date === tomorrow) {
+      s.date = today;
+      changed = true;
+    }
+  }
+  return changed;
 }
 
 // ── Cross-device sync (JSONBin.io) ─────────────────────────────────────
@@ -826,6 +856,7 @@ async function syncOnStartup() {
     pushRemote(loadSessions());
     return;
   }
+  fixFutureSessionDates(remote);
   const local  = loadSessions();
   const merged = mergeSessions(local, remote);
   const mergedChanged =
@@ -845,14 +876,26 @@ async function syncOnStartup() {
 }
 
 // ── Date helpers ───────────────────────────────────────────────────────
+// All "today" date keys are anchored to PST (America/Los_Angeles) so a
+// session logged in the evening stays on the correct calendar day instead of
+// rolling over to tomorrow under UTC.
+function pstDateKey(date) {
+  return new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'America/Los_Angeles',
+    year: 'numeric', month: '2-digit', day: '2-digit'
+  }).format(date || new Date());
+}
+
 function todayStr() {
-  return new Date().toISOString().slice(0, 10);
+  return pstDateKey();
 }
 
 function dayOffsetStr(offset) {
-  const d = new Date();
-  d.setDate(d.getDate() + offset);
-  return d.toISOString().slice(0, 10);
+  // Anchor at noon UTC of PST today so adding offsets is unaffected by
+  // PST/UTC boundary hours and DST transitions.
+  const base = new Date(todayStr() + 'T12:00:00Z');
+  base.setUTCDate(base.getUTCDate() + offset);
+  return pstDateKey(base);
 }
 
 function formatDate(dateStr) {
@@ -1129,10 +1172,10 @@ function renderHistory(sessions) {
     byDate.set(s.date, e);
   }
 
-  // Helper that mirrors todayStr()/dayOffsetStr() (UTC YYYY-MM-DD).
+  // Helper that mirrors todayStr()/dayOffsetStr() (PST YYYY-MM-DD).
   const dateStr = d => d.toISOString().slice(0, 10);
 
-  // Sunday-anchored week containing today (UTC, to match the rest of the app).
+  // Sunday-anchored week containing today (PST, to match the rest of the app).
   const todayKey = todayStr();
   const sundayOfThisWeek = new Date(todayKey + 'T00:00:00Z');
   sundayOfThisWeek.setUTCDate(
