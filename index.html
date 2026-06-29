@@ -876,26 +876,27 @@ async function syncOnStartup() {
 }
 
 // ── Date helpers ───────────────────────────────────────────────────────
-// All "today" date keys are anchored to PST (America/Los_Angeles) so a
-// session logged in the evening stays on the correct calendar day instead of
-// rolling over to tomorrow under UTC.
-function pstDateKey(date) {
+// All "today" date keys use the device's local timezone so a session logged
+// in the evening stays on the user's actual calendar day instead of rolling
+// over to tomorrow under UTC (or being misdated when the user isn't in PST).
+function localDateKey(date) {
   return new Intl.DateTimeFormat('en-CA', {
-    timeZone: 'America/Los_Angeles',
     year: 'numeric', month: '2-digit', day: '2-digit'
   }).format(date || new Date());
 }
+// Backwards-compatible alias (older code referenced pstDateKey).
+const pstDateKey = localDateKey;
 
 function todayStr() {
-  return pstDateKey();
+  return localDateKey();
 }
 
 function dayOffsetStr(offset) {
-  // Anchor at noon UTC of PST today so adding offsets is unaffected by
-  // PST/UTC boundary hours and DST transitions.
+  // Anchor at noon UTC of today so adding offsets is unaffected by
+  // local-vs-UTC boundary hours and DST transitions.
   const base = new Date(todayStr() + 'T12:00:00Z');
   base.setUTCDate(base.getUTCDate() + offset);
-  return pstDateKey(base);
+  return localDateKey(base);
 }
 
 function formatDate(dateStr) {
@@ -1172,10 +1173,10 @@ function renderHistory(sessions) {
     byDate.set(s.date, e);
   }
 
-  // Helper that mirrors todayStr()/dayOffsetStr() (PST YYYY-MM-DD).
+  // Helper that mirrors todayStr()/dayOffsetStr() (local YYYY-MM-DD).
   const dateStr = d => d.toISOString().slice(0, 10);
 
-  // Sunday-anchored week containing today (PST, to match the rest of the app).
+  // Sunday-anchored week containing today (local, to match the rest of the app).
   const todayKey = todayStr();
   const sundayOfThisWeek = new Date(todayKey + 'T00:00:00Z');
   sundayOfThisWeek.setUTCDate(
